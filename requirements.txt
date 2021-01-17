@@ -2,11 +2,14 @@ beautifulsoup4==4.9.3
 bs4==0.0.1
 certifi==2020.12.5
 chardet==4.0.0
+elasticsearch==7.10.1
 idna==2.10
 pika==1.1.0
 pkg-resources==0.0.0
 pytz==2020.5
 requests==2.25.1
 schedule==0.6.0
+six==1.15.0
 soupsieve==2.1
+tzlocal==2.1
 urllib3==1.26.2

@@ -8,7 +8,7 @@ import requests
 import schedule
 from bs4 import BeautifulSoup
 
-from helper import network, rbmq
+from helper import network, rbmq, setup_es
 
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -39,6 +39,7 @@ def get_total_page_mirror():
 
 
 def crawler_mirror():
+    es = setup_es.connect_elasticsearch()
     connection, channel = rbmq.setup_connect('compromised_queue')
     total_page = get_total_page_mirror()
     pages = [str(page) for page in range(1, total_page + 1)]
@@ -73,6 +74,9 @@ def crawler_mirror():
                         "timestamp": timestamp,
                         "country": country
                     }
+                    if es is not None:
+                        if setup_es.create_index_compromised(es, "compromised"):
+                            setup_es.store_record(es, "compromised", compromised)
                     send_compromised(channel, compromised)
     connection.close()
 

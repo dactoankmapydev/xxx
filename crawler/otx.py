@@ -6,8 +6,7 @@ from datetime import datetime
 import requests
 import pytz
 import schedule
-from helper import network, rbmq
-
+from helper import network, rbmq, setup_es
 OTX_API_KEY = "779cc51038ddb07c5f6abe0832fed858a6039b9e8cdb167d3191938c1391dbba"
 
 headers = {
@@ -37,6 +36,7 @@ def get_total_page_otx():
 
 
 def crawler_otx():
+    es = setup_es.connect_elasticsearch()
     connection, channel = rbmq.setup_connect("ioc_collect_queue")
     ist = pytz.timezone("Asia/Ho_Chi_Minh")
     total_page = get_total_page_otx()
@@ -74,6 +74,9 @@ def crawler_otx():
                     "source": "otx-alienvault",
                     "category": category
                 }
+                if es is not None:
+                    if setup_es.create_index_indicator(es, "indicator"):
+                        setup_es.store_record(es, "indicator", indicator)
                 send_indicator(channel, indicator)
     connection.close()
 
