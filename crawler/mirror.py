@@ -8,15 +8,11 @@ import requests
 import schedule
 from bs4 import BeautifulSoup
 
-from helper import network, setup_es
+from helper import network, setup_es, rbmq
 
 headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/71.0.3578.98 Safari/537.36"}
-proxies = {
-    "http": "http://127.0.0.1:3131",
-    "https": "http://127.0.0.1:3131",
-}
+    'User-Agent': 'Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
+                  'Chrome/71.0.3578.98 Safari/537.36'}
 
 http = requests.Session()
 # retries
@@ -24,33 +20,24 @@ http = requests.Session()
 
 # timeout 2s and retries
 http.mount("https://", network.TimeoutHTTPAdapter(max_retries=network.retry_http_adapter()))
-http.mount("http://", network.TimeoutHTTPAdapter(max_retries=network.retry_http_adapter()))
-
-
-def send_compromised(channel, message):
-    channel.basic_publish(exchange="",
-                          routing_key="compromised_queue",
-                          body=json.dumps(message),
-                          properties=pika.BasicProperties(priority=5))
-    print("Sent %r" % message)
 
 
 def get_total_page_mirror():
-    start_req = http.get("https://mirror-h.org/archive/", headers=headers, proxies=proxies)
-    parse_req = BeautifulSoup(start_req.text, "html.parser")
-    last_link = [link for link in parse_req.find_all("a", {"title": "Last"})]
-    total_page = int(last_link[0]["href"].rsplit("/", 1)[1])
+    start_req = http.get('https://mirror-h.org/archive/', headers=headers)
+    parse_req = BeautifulSoup(start_req.text, 'html.parser')
+    last_link = [link for link in parse_req.find_all('a', {'title': 'Last'})]
+    total_page = int(last_link[0]['href'].rsplit('/', 1)[1])
     return total_page
 
 
 def crawler_mirror():
     es = setup_es.connect_elasticsearch()
-    # connection, channel = setup_rbmq.setup_connect("compromised_queue")
+    connection, channel = rbmq.connect("compromised_queue")
     total_page = get_total_page_mirror()
     pages = [str(page) for page in range(1, total_page + 1)]
     for page in pages:
         url = "https://mirror-h.org/archive/page/{}".format(page)
-        res = http.get(url, headers=headers, proxies=proxies)
+        res = http.get(url, headers=headers)
         parse = BeautifulSoup(res.text, "html.parser")
         table = parse.find("table")
         for row in table.find_all("tr"):
@@ -78,15 +65,16 @@ def crawler_mirror():
                     "timestamp": timestamp,
                     "country": country
                 }
+                rbmq.send(channel, compromised, "compromised_queue")
                 if es is not None:
                     if setup_es.create_index_compromised(es, "ti-mirror-test"):
-                        setup_es.store_record(es, "ti-mirror-test", compromised)
-                # send_compromised(channel, compromised)
-    # connection.close()
+                        setup_es.store_record(es, "ti-mirror-test", victim_hash, compromised)
+    connection.close()
 
 
 crawler_mirror()
 schedule.every(30).minutes.do(crawler_mirror)
 while True:
+    print("cho doi 30p nua nhe...")
     schedule.run_pending()
-
+    time.sleep(1)
