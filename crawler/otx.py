@@ -7,17 +7,12 @@ import pytz
 import requests
 import schedule
 
-from helper import network, setup_es
+from helper import network, setup_es, rbmq
 
 OTX_API_KEY = "779cc51038ddb07c5f6abe0832fed858a6039b9e8cdb167d3191938c1391dbba"
 
 headers = {
     "X-OTX-API-KEY": OTX_API_KEY
-}
-
-proxies = {
-    "http": "http://127.0.0.1:3131",
-    "https": "http://127.0.0.1:3131",
 }
 
 http = requests.Session()
@@ -26,26 +21,16 @@ http = requests.Session()
 
 # timeout 2s and retries
 http.mount("https://", network.TimeoutHTTPAdapter(max_retries=network.retry_http_adapter()))
-http.mount("http://", network.TimeoutHTTPAdapter(max_retries=network.retry_http_adapter()))
-
-
-def send_indicator(channel, message):
-    channel.basic_publish(exchange="",
-                          routing_key="ioc_collect_queue",
-                          body=json.dumps(message),
-                          properties=pika.BasicProperties(priority=5))
-    print("Sent %r" % message)
-
 
 def get_total_page_otx():
-    results = http.get("https://otx.alienvault.com/api/v1/pulses/subscribed", headers=headers, proxies=proxies).json()
+    results = http.get("https://otx.alienvault.com/api/v1/pulses/subscribed", headers=headers).json()
     total_page = math.ceil(results["count"] / 50)
     return total_page
 
 
 def crawler_otx():
     es = setup_es.connect_elasticsearch()
-    # connection, channel = setup_rbmq.setup_connect("ioc_collect_queue")
+    connection, channel = rbmq.connect("ioc_collect_queue")
     ist = pytz.timezone("Asia/Ho_Chi_Minh")
     total_page = get_total_page_otx()
     sample = {"sample": ["FileHash-MD5", "FileHash-PEHASH", "FileHash-SHA256", "FileHash-IMPHASH", "FileHash-MD5"]}
@@ -55,7 +40,7 @@ def crawler_otx():
 
     for page in range(1, total_page + 1):
         data = http.get("https://otx.alienvault.com/api/v1/pulses/subscribed?limit=50&page={}".format(page),
-                        headers=headers, proxies=proxies).json()
+                        headers=headers).json()
         for item in data["results"]:
             pulse_id = item["id"]
             name = item["name"]
@@ -69,6 +54,24 @@ def crawler_otx():
             malware_families = item["malware_families"]
             attack_ids = item["attack_ids"]
             references = item["references"]
+
+            post = {
+                "pulse_id": pulse_id,
+                "name": name,
+                "description": description,
+                "author_name": author_name,
+                "modified": modified,
+                "created": created,
+                "targeted_countries": targeted_countries,
+                "industries": industries,
+                "malware_families": malware_families,
+                "attack_ids": attack_ids,
+                "references": references,
+                "category": category
+            }
+            if es is not None:
+                if setup_es.create_index_indicator(es, "ti-otx-post"):
+                    setup_es.store_record(es, "ti-otx-post", pulse_id, post)
 
             for value in item["indicators"]:
                 ioc_id = value["id"]
@@ -86,17 +89,6 @@ def crawler_otx():
                     ioc_type = "ipaddress"
 
                 indicator = {
-                    "pulse_id": pulse_id,
-                    "name": name,
-                    "description": description,
-                    "author_name": author_name,
-                    "modified": modified,
-                    "created": created,
-                    "targeted_countries": targeted_countries,
-                    "industries": industries,
-                    "malware_families": malware_families,
-                    "attack_ids": attack_ids,
-                    "references": references,
                     "ioc_id": ioc_id,
                     "ioc": ioc,
                     "ioc_type": ioc_type,
@@ -105,15 +97,16 @@ def crawler_otx():
                     "source": "otx",
                     "category": category
                 }
-                print(indicator)
+                rbmq.send(channel, indicator, "ioc_collect_queue")
                 if es is not None:
-                    if setup_es.create_index_indicator(es, "ti-otx-test"):
-                        setup_es.store_record(es, "ti-otx-test", indicator)
-                # send_indicator(channel, indicator)
-    # connection.close()
+                    if setup_es.create_index_indicator(es, "ti-otx-indicator"):
+                        setup_es.store_record(es, "ti-otx-indicator", ioc_id, indicator)
+    connection.close()
 
 
 crawler_otx()
 schedule.every(30).minutes.do(crawler_otx)
 while True:
+    print("cho doi 30p nua nhe...")
     schedule.run_pending()
+    time.sleep(1)
