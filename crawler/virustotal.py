@@ -1,17 +1,14 @@
+import json
+import time
 from datetime import datetime
 
 import requests
 import schedule
 
-from helper import network, setup_es
+from helper import network, setup_es, rbmq
 
 headers = {
-    "X-Apikey": "7d42532bd1dea1e55f7a8e99cdee23d9b26c386a6485d6dcb4106b9d055f9277"
-}
-
-proxies = {
-    "http": "http://127.0.0.1:3131",
-    "https": "http://127.0.0.1:3131",
+    'X-Apikey': '7d42532bd1dea1e55f7a8e99cdee23d9b26c386a6485d6dcb4106b9d055f9277'
 }
 
 http = requests.Session()
@@ -20,11 +17,11 @@ http = requests.Session()
 
 # timeout 2s and retries
 http.mount("https://", network.TimeoutHTTPAdapter(max_retries=network.retry_http_adapter()))
-http.mount("http://", network.TimeoutHTTPAdapter(max_retries=network.retry_http_adapter()))
 
 
 def hunting_notification_files():
     es = setup_es.connect_elasticsearch()
+    connection, channel = rbmq.connect("ioc_vr_queue")
     engines_hash = {
         "Ad-Aware": 1,
         "AegisLab": 1,
@@ -107,10 +104,11 @@ def hunting_notification_files():
     while len(cursor) > 0:
         api = "https://www.virustotal.com/api/v3/intelligence/hunting_notification_files?limit=40&cursor={}".format(
             cursor[0])
-        data = http.get(api, headers=headers, proxies=proxies).json()
+        data = http.get(api, headers=headers).json()
         if data["meta"]["cursor"] != "":
             cursor[0] = data["meta"]["cursor"]
             for item in data["data"]:
+                samples_id = item["id"]
                 names = "".join(item["attributes"]["names"])
                 sha256 = item["attributes"]["sha256"]
                 sha1 = item["attributes"]["sha1"]
@@ -161,13 +159,16 @@ def hunting_notification_files():
                     }
                     if es is not None:
                         if setup_es.create_index_samples(es, "ti-virus-test"):
-                            setup_es.store_record(es, "ti-virus-test", samples)
+                            setup_es.store_record(es, "ti-virus-test", samples_id, samples)
+                    rbmq.send(channel, samples, "ioc_vr_queue")
         else:
             cursor.clear()
+    connection.close()
 
 
 hunting_notification_files()
 schedule.every(30).minutes.do(hunting_notification_files)
 while True:
+    print("cho doi 30p nua nhe...")
     schedule.run_pending()
-
+    time.sleep(1)
