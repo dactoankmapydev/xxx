@@ -3,11 +3,11 @@ from elasticsearch import Elasticsearch
 
 def connect_elasticsearch():
     _es = None
-    _es = Elasticsearch([{"host": "localhost", "port": 9500}])
+    _es = Elasticsearch([{'host': 'localhost', 'port': 9200}])
     if _es.ping():
-        print("Connected Elasticsearch")
+        print('Connected Elasticsearch')
     else:
-        print("Elasticsearch could not connect!")
+        print('Elasticsearch could not connect!')
     return _es
 
 
@@ -39,34 +39,19 @@ def create_index_indicator(es_object, index_name):
                     "type": "date"
                 },
                 "targeted_countries": {
-                    "type": "nested",
-                    "properties": {
-                        "step": {"type": "text"}
-                    }
+                    "type": "text",
                 },
                 "industries": {
-                    "type": "nested",
-                    "properties": {
-                        "step": {"type": "text"}
-                    }
+                    "type": "text",
                 },
                 "malware_families": {
-                    "type": "nested",
-                    "properties": {
-                        "step": {"type": "text"}
-                    }
+                    "type": "text",
                 },
                 "attack_ids": {
-                    "type": "nested",
-                    "properties": {
-                        "step": {"type": "text"}
-                    }
+                    "type": "text",
                 },
                 "references": {
                     "type": "text",
-                    "properties": {
-                        "step": {"type": "text"}
-                    }
                 },
                 "ioc_id": {
                     "type": "text"
@@ -84,7 +69,7 @@ def create_index_indicator(es_object, index_name):
                     "type": "date"
                 },
                 "source": {
-                    "type": "integer"
+                    "type": "text"
                 },
                 "category": {
                     "type": "text",
@@ -95,6 +80,7 @@ def create_index_indicator(es_object, index_name):
 
     try:
         if not es_object.indices.exists(index_name):
+            print("not exists")
             res = es_object.indices.create(index=index_name, ignore=400, body=settings)
             print(res)
         created_index_indicator = True
@@ -192,16 +178,10 @@ def create_index_samples(es_object, index_name):
                     "type": "text",
                 },
                 "tags": {
-                    "type": "nested",
-                    "properties": {
-                        "step": {"type": "text"}
-                    }
+                    "type": "text",
                 },
                 "detected": {
-                    "type": "nested",
-                    "properties": {
-                        "step": {"type": "text"}
-                    }
+                    "type": "text",
                 },
                 "point": {
                     "type": "integer",
@@ -221,15 +201,14 @@ def create_index_samples(es_object, index_name):
         return created_index_samples
 
 
-def store_record(elastic_object, index_name, record):
+def store_record(elastic_object, index_name, index_id, record):
     is_stored = True
     try:
-        outcome = elastic_object.index(index=index_name, body=record)
-        print(outcome)
+        output = elastic_object.index(index=index_name, id=index_id, body=record)
+        print(output)
     except Exception as ex:
         print("Error in indexing data")
         print(str(ex))
         is_stored = False
     finally:
         return is_stored
-
